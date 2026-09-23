@@ -227,11 +227,14 @@ class CalendarSkill(Skill):
         import shutil
         import subprocess
 
+        from assistant.notify import clean_env
+
+        env = clean_env()
         if shutil.which(self.open_with) or shutil.which("gnome-calendar"):
             binary = self.open_with if shutil.which(self.open_with) else "gnome-calendar"
             try:
                 subprocess.Popen(
-                    [binary], start_new_session=True,
+                    [binary], start_new_session=True, env=env,
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 )
                 return Reply(speak="Opening your calendar now.",
@@ -242,7 +245,7 @@ class CalendarSkill(Skill):
         ics = self._export_ics()
         try:
             subprocess.Popen(
-                ["xdg-open", str(ics.parent)], start_new_session=True,
+                ["xdg-open", str(ics.parent)], start_new_session=True, env=env,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
         except OSError:

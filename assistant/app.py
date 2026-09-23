@@ -1,13 +1,17 @@
-"""Main orchestrator — wires activation, audio, brain, skills, agent, HUD."""
+"""Main orchestrator — wires activation, audio, brain, skills, agent, orb.
+
+The only visible UI is the AI orb (assistant/ui/orb.py): a small text-free
+circle with a Google-AI gradient that spring-follows the cursor. Everything
+else is voice + desktop notifications.
+"""
 
 from __future__ import annotations
 
 import argparse
 import signal
-import sys
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from assistant.agent.bridge import AgentBridge
 from assistant.agent.client import AgentClient
@@ -17,6 +21,7 @@ from assistant.brain.knowledge import KnowledgeBase
 from assistant.brain.router import Router
 from assistant.config import Config, ensure_runtime_dirs
 from assistant.logger import get_logger, setup_logging
+from assistant.notify import notify
 from assistant.skills.apps_skill import AppsSkill
 from assistant.skills.base import Skill
 from assistant.skills.calendar_skill import CalendarSkill
@@ -26,6 +31,7 @@ from assistant.skills.status_skill import StatusSkill
 from assistant.skills.system_skill import SystemSkill
 from assistant.skills.time_skill import TimeSkill
 from assistant.types import Reply
+from assistant.ui.orb import CursorTracker
 
 log = get_logger("app")
 
@@ -41,7 +47,7 @@ class Session:
 class Options:
     text: bool = False            # REPL instead of voice
     once: str | None = None       # single utterance, print reply, exit
-    no_hud: bool = False
+    no_orb: bool = False
     mute: bool = False
     config: str | None = None
 
@@ -62,8 +68,8 @@ class AssistantApp:
         self.work_steps: list[str] = []
         self.work_step_index = 0
         self._stop = threading.Event()
-        self._speak_gate = threading.Lock()
         self._state = "READY"
+        self.cursor = CursorTracker()
 
         # --- knowledge + skills -------------------------------------------
         self.knowledge = KnowledgeBase(
@@ -103,7 +109,7 @@ class AssistantApp:
         self.speaker = None
         self.stt = None
         self.mic = None
-        self.hud = None
+        self.orb = None
         self.input_monitor = None
         self.vad = None
         self._session_lock = threading.Lock()
@@ -117,7 +123,7 @@ class AssistantApp:
     # Lifecycle
     # ==================================================================
     def start(self) -> None:
-        """Start bridge, watchers, HUD, audio pipeline."""
+        """Start bridge, watchers, orb, audio pipeline."""
         self.bridge.start()
         self.status_watcher.start()
 
@@ -127,12 +133,9 @@ class AssistantApp:
         self._start_speaker()
 
         if self.options.text:
-            return  # REPL mode: no HUD/mic needed
+            return  # REPL mode: no orb/mic needed
 
-        self._start_hud()
-        if not self.options.no_hud and self.hud is None:
-            # HUD disabled by config — fall through silently
-            pass
+        self._start_orb()
         self._start_audio_pipeline()
         signal.signal(signal.SIGINT, self._signal_stop)
         signal.signal(signal.SIGTERM, self._signal_stop)
@@ -141,8 +144,8 @@ class AssistantApp:
         if self.options.text:
             self._repl()
             return
-        if self.hud is not None:
-            self.hud.run()  # blocks; worker threads keep running
+        if self.orb is not None:
+            self.orb.run()  # GTK main loop; worker threads keep running
             self.shutdown()
             return
         # headless: block until stop
@@ -162,6 +165,11 @@ class AssistantApp:
             self.status_watcher.stop()
         except Exception:  # noqa: BLE001
             pass
+        if self.orb is not None:
+            try:
+                self.orb.quit()
+            except Exception:  # noqa: BLE001
+                pass
         for closer in (self.input_monitor, self.mic, self.speaker):
             if closer is not None:
                 try:
@@ -176,8 +184,11 @@ class AssistantApp:
     def _signal_stop(self, signum, frame) -> None:  # noqa: ANN001
         log.info("received signal %s", signum)
         self._stop.set()
-        if self.hud is not None and self.hud.root:
-            self.hud.root.after(0, self.hud.root.destroy)
+        if self.orb is not None:
+            try:
+                self.orb.quit()
+            except Exception:  # noqa: BLE001
+                pass
 
     # ==================================================================
     # Component starters
@@ -196,39 +207,55 @@ class AssistantApp:
         )
         self.speaker.start()
 
-    def _start_hud(self) -> None:
-        if self.options.no_hud or not self.cfg.get("hud.enabled", True):
+    def _start_orb(self) -> None:
+        """The one and only window: a tiny text-free gradient orb."""
+        if self.options.no_orb or not self.cfg.get("orb.enabled", True):
+            log.info("orb disabled")
             return
         try:
-            from assistant.ui.hud import HUD
+            from assistant.ui.orb import OrbUI
         except Exception as exc:  # noqa: BLE001
-            log.warning("HUD unavailable: %s", exc)
+            log.warning("orb module unavailable: %s", exc)
             return
-        self.hud = HUD(
-            width=int(self.cfg.get("hud.width", 440)),
-            height=int(self.cfg.get("hud.height", 620)),
-            x=int(self.cfg.get("hud.x", 24)),
-            y=int(self.cfg.get("hud.y", 24)),
-            always_on_top=bool(self.cfg.get("hud.always_on_top", True)),
-            on_talk_press=self.arm_session,
-            on_talk_release=lambda: None,
-            on_close=self.shutdown,
-        )
-        self.hud.set_state("READY", "🖱️ Shake your cursor to talk  ·  or hold Talk")
-        self.hud.set_agent(self.bridge.state.get_status().get("state", "idle"))
+        try:
+            self.orb = OrbUI(
+                size=int(self.cfg.get("orb.size", 132)),
+                opacity=float(self.cfg.get("orb.opacity", 0.97)),
+                omega=float(self.cfg.get("orb.follow_omega", 14.0)),
+                zeta=float(self.cfg.get("orb.follow_zeta", 0.85)),
+                tracker=self.cursor,
+            )
+            # Build here (main thread) so GTK owns this thread; run() reuses it.
+            self.orb.build()
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "orb unavailable (%s) — running voice-only with notifications",
+                exc,
+            )
+            self.orb = None
+            return
+        self.orb.set_state("READY")
+        self.orb.set_agent(self.bridge.state.get_status().get("state", "idle"))
 
     def _start_audio_pipeline(self) -> None:
         from assistant.activation.mouse_shake import ShakeDetector, start_input_monitor
         from assistant.audio.microphone import EnergyVAD, Microphone
         from assistant.stt import build_stt
 
-        # shake detector → arms a listening session
+        # light-shake detector → arms a listening session; also feeds the
+        # orb's cursor tracker with raw deltas (pointer-query fallback).
         detector = ShakeDetector(
-            direction_changes=int(self.cfg.get("activation.shake.direction_changes", 4)),
-            window_seconds=float(self.cfg.get("activation.shake.window_seconds", 0.7)),
-            min_travel=float(self.cfg.get("activation.shake.min_travel_px", 100)),
-            cooldown_seconds=float(self.cfg.get("activation.shake.cooldown_seconds", 1.5)),
+            direction_changes=int(
+                self.cfg.get("activation.shake.direction_changes", 3)),
+            window_seconds=float(
+                self.cfg.get("activation.shake.window_seconds", 1.0)),
+            min_travel=float(self.cfg.get("activation.shake.min_travel_px", 18)),
+            cooldown_seconds=float(
+                self.cfg.get("activation.shake.cooldown_seconds", 0.8)),
+            min_event_px=float(
+                self.cfg.get("activation.shake.min_event_px", 0.8)),
             on_shake=self._on_shake,
+            on_move=self.cursor.update,
         )
         self.input_monitor = start_input_monitor(
             self.cfg, detector, on_hotkey=self._on_shake
@@ -268,7 +295,7 @@ class AssistantApp:
 
         threading.Thread(target=self._listen_loop, name="listen", daemon=True).start()
         threading.Thread(target=self._session_loop, name="session", daemon=True).start()
-        log.info("audio pipeline up (shake → listen → transcribe → respond)")
+        log.info("audio pipeline up (light shake → listen → transcribe → respond)")
 
     # ==================================================================
     # Session (listening) management
@@ -285,7 +312,7 @@ class AssistantApp:
         from assistant.audio.speaker import earcon
 
         earcon("listen")
-        self._set_state("LISTENING", "🎙️ Listening — speak now")
+        self._set_state("LISTENING")
         log.info("session armed (%.0fs)", timeout)
 
     def extend_session(self, extra: float | None = None) -> None:
@@ -299,16 +326,16 @@ class AssistantApp:
             self.session.active = False
             self.session.deadline = 0.0
         if self._state == "LISTENING":
-            self._set_state("READY", "🖱️ Shake your cursor to talk")
+            self._set_state("READY")
 
     def _session_loop(self) -> None:
         while not self._stop.is_set():
             time.sleep(0.25)
             with self._session_lock:
-                expired = self.session.active and time.monotonic() > self.session.deadline
+                expired = self.session.active and \
+                    time.monotonic() > self.session.deadline
             if expired:
                 if self.cfg.get("activation.always_listening", False):
-                    # "always active" mode: never fully disarm — re-arm instantly
                     log.info("session re-armed (always_listening)")
                     self.arm_session()
                 else:
@@ -316,9 +343,7 @@ class AssistantApp:
                     self.disarm_session()
 
     def _on_shake(self) -> None:
-        log.info("cursor shake detected")
-        if self.hud:
-            self.hud.show_status("shake detected → listening")
+        log.info("light shake detected → listening")
         self.arm_session()
 
     def _session_is_active(self) -> bool:
@@ -329,8 +354,6 @@ class AssistantApp:
     # Listen → transcribe → respond
     # ==================================================================
     def _listen_loop(self) -> None:
-        import numpy as np
-
         while not self._stop.is_set():
             if self.mic is None:
                 time.sleep(0.5)
@@ -342,11 +365,10 @@ class AssistantApp:
                 continue
             state, utterance = self.vad.feed(frame)
             if state == "speech" and self._state != "LISTENING":
-                self._set_state("LISTENING", "🎙️ Listening…")
+                self._set_state("LISTENING")
             if state != "done" or utterance is None:
                 continue
 
-            # Got an utterance — handle it (worker keeps mic loop free).
             self.extend_session(extra=8.0)
             threading.Thread(
                 target=self._handle_utterance_async,
@@ -364,7 +386,7 @@ class AssistantApp:
     def _handle_voice(self, frames) -> None:
         from assistant.audio.speaker import earcon
 
-        self._set_state("THINKING", "🧠 Thinking…")
+        self._set_state("THINKING")
         earcon("think")
         if self.stt is None:
             self.speak("Speech recognition isn't ready yet.")
@@ -372,8 +394,8 @@ class AssistantApp:
         transcript = self.stt.transcribe(frames)
         text = transcript.text.strip()
         log.info("heard: %r (conf=%.2f)", text, transcript.confidence)
-        if self.hud:
-            self.hud.show_transcript(text or "…")
+        if self.orb:
+            self.orb.show_transcript(text or "…")
         if not text:
             self.speak("I didn't catch that. Say that again, please.")
             self.extend_session()
@@ -389,7 +411,6 @@ class AssistantApp:
         reply = self.handle_text(text)
         if reply:
             self.respond(reply)
-        # conversation continues while the session is armed
         self.extend_session()
 
     # ==================================================================
@@ -402,13 +423,10 @@ class AssistantApp:
         return outcome.reply
 
     def respond(self, reply: Reply) -> None:
-        display = reply.shown()
-        title = None
         if reply.escalated:
-            title = "📤 SENT TO AGENT MODE — answer will appear here"
-            self._set_state("THINKING", "📤 Waiting for Agent Mode…")
-        if self.hud:
-            self.hud.show_output(display, title=title)
+            self._set_state("THINKING")   # waiting for Agent Mode
+            if self.orb:
+                self.orb.show_output(reply.shown())
         self.speak(reply.speak)
 
     def speak(self, text: str) -> None:
@@ -418,19 +436,21 @@ class AssistantApp:
             log.info("[speak] %s", text)
 
     def announce(self, speak: str, display: str) -> None:
-        """Proactive voice + HUD push (status watcher, timers, agent events)."""
+        """Proactive push (status watcher, timers, agent events): voice + notification."""
         self._announce_now(speak, display)
 
     def _announce_now(self, speak: str, display: str,
-                      title: str | None = None) -> None:
-        if self.hud:
-            self.hud.append_output(f"— {display}")
+                      title: str = "PSD Voice") -> None:
+        if self.orb:
+            self.orb.append_output(display)
+            self.orb.burst()
+        notify(title, display)
         self.speak(speak)
 
-    def _set_state(self, state: str, hint: str | None = None) -> None:
+    def _set_state(self, state: str) -> None:
         self._state = state
-        if self.hud:
-            self.hud.set_state(state, hint)
+        if self.orb:
+            self.orb.set_state(state)
 
     # ==================================================================
     # Agent Mode integration
@@ -449,34 +469,42 @@ class AssistantApp:
         source = payload.get("source", "agent")
         speak = payload.get("speak") or ""
         detail = payload.get("detail") or payload.get("answer") or ""
-        title = f"🤖 AGENT MODE · {source}"
-        if self.hud:
-            body = f"speak: {speak}\n\ndetail:\n{detail}"
-            self.hud.show_output(body, title=title)
-            self.hud.set_agent("done")
+
+        if self.orb:
+            self.orb.show_output(f"speak: {speak}\ndetail:\n{detail}")
+            self.orb.set_agent("done" if source not in ("timeout",) else "idle")
+            self.orb.burst()            # bright sparkle pop = answer landed
+
         if source == "timeout":
+            notify("Agent Mode", speak or "No answer yet.", urgency="low")
             self.speak(speak or "No answer from Agent Mode yet.")
             return
-        log.info("agent answer (%s): %s", source, speak)
-        self.speak(speak or detail.splitlines()[0] if detail else
-                   "Here's the answer from Agent Mode.")
+
+        # The orb shows NO text — the answer is DISPLAYED via notification
+        # and SPOKEN in full summary form.
+        notify("🤖 Agent Mode answer", f"{speak}\n\n{detail}", urgency="normal",
+               timeout_ms=12000)
+        log.info("agent answer (%s): %s | %s", source, speak, detail[:200])
+        self.speak(speak or (detail.splitlines()[0] if detail else
+                             "Here's the answer from Agent Mode."))
 
         # Extract numbered steps so the user can navigate them by voice.
         steps = craft.extract_steps(detail)
         if steps:
             self.work_steps = steps
             self.work_step_index = 1
-            if self.hud:
-                lines = ["🛠️ Steps loaded — say 'next step' to walk through them:"]
-                lines += [f"  {i+1}. {s}" for i, s in enumerate(steps)]
-                self.hud.append_output("\n".join(lines))
+            log.info("loaded %d navigable steps ('next step' ready)", len(steps))
+            if self.orb:
+                self.orb.append_output(
+                    f"{len(steps)} steps loaded — say 'next step' to walk through"
+                )
 
     def _on_status_event(self, status: dict) -> None:
         state = status.get("state", "idle")
-        if self.hud:
-            self.hud.set_agent(state)
-        # StatusWatcher (file poll) handles the spoken announcement; this
-        # callback only keeps the HUD pill in sync instantly.
+        if self.orb:
+            self.orb.set_agent(state)
+        # Spoken announcement comes from StatusWatcher; this only syncs the
+        # orb's colour/motion instantly (working = amber shimmer, done = pop).
 
     # ==================================================================
     # Text REPL (`--text`)
@@ -509,17 +537,18 @@ class AssistantApp:
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="assistant",
-        description="PSD AI Voice Assistant — voice-first desktop companion",
+        description="PSD AI Voice Assistant — voice-first desktop companion "
+                    "with a cursor-following AI orb",
     )
     parser.add_argument("--config", help="path to config.yaml")
     parser.add_argument("--text", action="store_true",
                         help="text REPL instead of voice mode (debug)")
     parser.add_argument("--once", metavar="UTTERANCE",
                         help="process one utterance, print reply, exit")
-    parser.add_argument("--no-hud", action="store_true", help="disable the HUD")
+    parser.add_argument("--no-orb", "--no-hud", dest="no_orb",
+                        action="store_true",
+                        help="disable the AI orb overlay")
     parser.add_argument("--mute", action="store_true", help="no TTS output")
-    parser.add_argument("--no-bridge", action="store_true",
-                        help=argparse.SUPPRESS)  # reserved
     return parser
 
 
@@ -536,7 +565,6 @@ def run_once(opts: Options) -> int:
         print("---")
         print(reply.display)
         print("---")
-    # Give the bridge a moment to flush prompt files, then exit.
     time.sleep(0.4)
     app.bridge.stop()
     return 0
@@ -547,7 +575,7 @@ def main(argv: list[str] | None = None) -> int:
     opts = Options(
         text=args.text,
         once=args.once,
-        no_hud=args.no_hud,
+        no_orb=args.no_orb,
         mute=args.mute,
         config=args.config,
     )

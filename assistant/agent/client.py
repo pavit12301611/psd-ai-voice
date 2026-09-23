@@ -70,13 +70,13 @@ class AgentClient:
             name=f"wait-{crafted.prompt_id[:8]}",
         ).start()
 
-        hud_line = (
+        queued_line = (
             f"📤 Sent to Agent Mode (#{crafted.prompt_id[-6:]})\n"
             f"   {crafted.short_ask}\n\n{crafted.body}"
         )
         return Reply(
             speak=crafted.short_ask,
-            display=hud_line,
+            display=queued_line,
             data={"prompt_id": crafted.prompt_id, "queued": True},
             escalated=True,
         )

@@ -9,12 +9,12 @@
     {
       "id": "capabilities",
       "topics": ["what can you do", "help", "capabilities", "features", "commands", "your skills"],
-      "answer": "I can add events to your calendar, open any installed app, control volume and brightness, take screenshots, lock your screen, tell the time, set timers, keep notes, check my own knowledge, and send work requests to Agent Mode. Shake your mouse to talk to me. Say: what can you do for a full tour."
+      "answer": "I can add events to your calendar, open any installed app, control volume and brightness, take screenshots, lock your screen, tell the time, set timers, keep notes, check my own knowledge, and send work requests to Agent Mode. Just give your cursor a light shake to talk to me — my glowing orb follows along."
     },
     {
       "id": "activation",
-      "topics": ["wake you", "activate", "shake", "talk to you", "start listening", "how do i use you", "cursor"],
-      "answer": "Shake your cursor left and right quickly and I'll start listening. You can also press the Talk button on the HUD or hit Control Alt V. I stay armed until you're done talking, then go back to sleep until the next shake."
+      "topics": ["wake you", "activate", "shake", "talk to you", "start listening", "how do i use you", "cursor", "orb", "circle", "gradient"],
+      "answer": "I'm the little AI gradient orb floating with your cursor — no window, no text, just me glowing. Give the cursor even a light shake and I wake up and listen. You can also press Control Alt V. I stay awake until you're done talking, then drift back to idle."
     },
     {
       "id": "agent_mode",

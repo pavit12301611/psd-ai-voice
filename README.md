@@ -3,8 +3,9 @@
 A **fully-featured, voice-first Python assistant** built for **Fedora Workstation 44**.
 It has its own offline knowledge base, understands everyday speech, and — when it
 doesn't know something — **crafts a proper prompt and hands it to Agent Mode**
-(the Arena coding agent). Answers come back, get **displayed on the HUD**, and are
-**read aloud**.
+(the Arena coding agent). Answers come back **spoken aloud** and **shown as a
+desktop notification** — while a small **AI gradient orb** (no text, ever)
+follows your cursor and reacts to every state.
 
 One command to run it:
 
@@ -18,10 +19,11 @@ One command to run it:
 
 | Area | What it does |
 |---|---|
-| 🖱️ **Cursor-shake activation** | Shake your mouse left↔right quickly → assistant starts listening. Native Wayland support via `evdev`, X11 via `pynput`. HUD **Talk** button + `Ctrl+Alt+V` hotkey as fallbacks. |
+| 🔮 **AI orb (the only window)** | A small frameless circle with a flowing **Google-AI gradient** (blue → violet → rose → aqua) that **spring-follows your cursor**. **No text, ever** — states are pure motion: breathing / ripples + waveform / vortex / pulses / sparkle burst. Fully **click-through**. |
+| 🖱️ **Light-shake activation** | Even a **gentle wiggle** triggers it: 3 reversals inside 1 s, ~18 px of travel (both axes count); sub-pixel jitter ignored. Wayland `evdev` · X11 `pynput` · `Ctrl+Alt+V` hotkey. |
 | 🎙️ **Voice in / voice out** | Offline STT (**Vosk**) + TTS (**espeak-ng**), energy VAD with auto end-of-speech, conversation sessions that stay open until you're done. |
 | 🧠 **Own knowledge base** | Local JSON knowledge with smart retrieval — "who are you", "what can you do", how agent mode works, etc. **Teachable**: say *"remember that the deploy server is thor"*. |
-| 🤖 **Agent Mode bridge** | Anything it can't handle → **structured, well-engineered prompt** → local bridge server → the Arena agent answers → HUD display + spoken reply. Optional LLM fallback (OpenAI-compatible) when no agent is online. |
+| 🤖 **Agent Mode bridge** | Anything unknown → **structured prompt** → localhost bridge → the Arena agent answers → **spoken aloud + desktop notification** (the orb never shows text). Optional LLM fallback (OpenAI-compatible) when no agent is online. |
 | 📊 **Work-status watcher** | Watches `data/agent_status.json` and **announces**: *"Agent mode update: I'm now working on …"* / *"… I'm done with …"*. Ask anytime: *"what's the agent status?"* |
 | 📅 **Calendar** | *"add project sync tomorrow at 3 pm to my calendar"* → SQLite store + standards-compliant `.ics` export + opens GNOME Calendar. |
 | 🚀 **App launcher** | *"open Firefox"*, *"launch terminal"* — fuzzy-matches installed `.desktop` entries, launches via `gio`/`gtk-launch`. |
@@ -30,7 +32,7 @@ One command to run it:
 | 📝 **Notes** | *"note: buy coffee beans"* / *"read my notes"* / *"clear notes"*. |
 | 🛠️ **Work companion** | *"how do I create a user on Fedora?"* → Agent Mode returns numbered steps → walk through them: *"next step"*, *"repeat"*. |
 | ✍️ **Prompt dictation** | *"prompt: refactor my backup script to run nightly"* → polished into a structured brief and queued to Agent Mode. |
-| 🖥️ **HUD** | Always-on-top dark panel: state pill, live transcript, agent answers, Talk button. Voice remains the primary interface. |
+| 🔮 **Orb UI** | The one and only window: circle, gradient, motion. Full text (agent answers, steps, status) is delivered via voice + `notify-send` notifications. |
 | 📴 **Works offline** | STT/TTS/knowledge/skills are fully local; only Agent answers need the bridge (localhost) or an optional LLM API key. |
 
 ---
@@ -48,7 +50,7 @@ First run will:
 2. Create a virtualenv and `pip install -r requirements.txt`
 3. Download the offline Vosk speech model (~40 MB)
 4. Ask (once) to add your user to the **`input` group** so cursor-shake works natively on Wayland — **log out/in once** after accepting
-5. Launch the assistant + HUD
+5. Launch the assistant — the AI orb appears glued to your cursor
 
 ### Useful flags
 
@@ -56,8 +58,8 @@ First run will:
 ./run.sh --setup        # deps + model only, don't start
 ./run.sh --text         # text REPL instead of voice (debugging)
 ./run.sh --once "open firefox"   # one-shot: process & print, exit
-./run.sh --no-hud       # voice without the window
-./run.sh --mute         # no spoken audio (HUD/console only)
+./run.sh --no-orb       # voice only, no orb overlay
+./run.sh --mute         # no spoken audio (orb + notifications only)
 ./run.sh --autostart    # also install GNOME login autostart entry
 ./run.sh --dev          # reinstall python deps
 ./run.sh -y --setup     # non-interactive setup
@@ -67,9 +69,14 @@ First run will:
 
 ## 🗣️ How to use it
 
-1. **Shake the cursor** (quick left-right wiggle) *or* press the HUD **Talk** button *or* hit **Ctrl+Alt+V**.
-2. Hear the short beep → **speak**. It stops listening ~1.2 s after you stop.
-3. It responds **out loud** and on the HUD. The session stays armed (~20 s) so you can follow up — just keep talking. Shake again anytime to re-arm.
+There is **no window and no text** — just the glowing AI orb glued to your cursor.
+
+1. **Light-shake the cursor** (a gentle wiggle is enough) — or press **Ctrl+Alt+V**.
+2. The orb grows, sprouts ripple rings and a waveform edge + you hear a beep → **speak**.
+3. It answers **out loud**; Agent answers and work status additionally pop a
+   **desktop notification** with the full text (the orb never shows text).
+   The orb stays pure: breathing → vortex → pulses → sparkle burst.
+4. The session stays armed (~20 s) for natural follow-ups. Shake anytime to re-arm.
 
 ### Things to say
 
@@ -116,12 +123,13 @@ what can you do
                               └──────────┬──────────┘    fallback) answers
                                          │ 2. POST /outbox {id, answer}
                                          ▼
-                              HUD shows answer + TTS speaks "speak:" line
+                              Orb sparkle-burst + notification + TTS speaks "speak:" line
 ```
 
 **Prompt format** (crafted by `assistant/brain/prompts.py`): every request carries
 *User said → inferred intent → environment → exact Task → Response contract* with
-mandatory `speak:` (≤ 40 words, spoken) and `detail:` (full answer/steps, HUD)
+mandatory `speak:` (≤ 40 words, spoken) and `detail:` (full answer/steps, shown
+in the notification)
 sections — so replies always come back display- and speech-ready.
 
 ### Driving it from an Arena agent session
@@ -203,7 +211,7 @@ psd-ai-voice/
 ├── run.sh                     ← Fedora 44 one-command setup + launcher
 ├── requirements.txt
 ├── config/
-│   ├── config.yaml            ← all tunables (mic, shake, agent, HUD…)
+│   ├── config.yaml            ← all tunables (mic, orb, shake, agent…)
 │   └── knowledge.seed.json    ← initial "own knowledge"
 ├── assistant/
 │   ├── app.py                 ← orchestrator (sessions, loops, wiring)
@@ -220,7 +228,7 @@ psd-ai-voice/
 │   ├── audio/                 ← microphone + energy VAD, speaker (queued TTS)
 │   ├── stt/                   ← vosk (default) / faster-whisper (optional)
 │   ├── activation/            ← cursor-shake detector (evdev | pynput)
-│   └── ui/hud.py              ← always-on-top Tkinter HUD
+│   └── ui/orb.py              ← AI orb: GTK3+cairo, spring-follow, click-through
 ├── agent_server/server.py     ← bridge as a standalone process
 └── tests/                     ← unit tests (no mic needed)
 ```
@@ -244,17 +252,25 @@ data/
 ## ⚙️ Configuration highlights — `config/config.yaml`
 
 ```yaml
+orb:                          # the ONLY window — circle, gradient, no text
+  enabled: true
+  size: 132                   # diameter px
+  follow_omega: 14.0          # spring sharpness (cursor follow)
+  follow_zeta: 0.85           # damping — floatier = more lag
 activation:
-  shake: {direction_changes: 4, window_seconds: 0.7, min_travel_px: 100}
-  session_timeout: 20        # silence before it disarms
-  always_listening: false    # true = auto re-arm forever ("always active")
+  shake:                      # LIGHT shake profile
+    direction_changes: 3
+    window_seconds: 1.0
+    min_travel_px: 18
+    cooldown_seconds: 0.8
+  session_timeout: 20         # silence before it disarms
+  always_listening: false     # true = auto re-arm forever ("always active")
 audio:
-  vad_energy_threshold: 400  # raise if it hears background noise
+  vad_energy_threshold: 400   # raise if it hears background noise
 agent:
   port: 8765
   answer_timeout: 180
   llm: {enabled: false}
-hud: {enabled: true, always_on_top: true, width: 440, height: 620}
 ```
 
 ---
@@ -274,10 +290,13 @@ ls data/agent_inbox/
 
 | Symptom | Fix |
 |---|---|
-| Shake does nothing (Wayland) | Accept the **input group** prompt in `run.sh`, log out/in. Or use HUD Talk / `Ctrl+Alt+V`. |
+| Shake does nothing (Wayland) | Accept the **input group** prompt in `run.sh`, log out/in. Or press `Ctrl+Alt+V`. |
+| Orb not visible | `dnf install python3-gobject python3-cairo xorg-x11-server-Xwayland`, then restart. Check `data/assistant.log` for "orb online". |
+| Orb visible but frozen | XWayland hiccup — restart the assistant (`./run.sh`). |
 | No speech detected | Raise mic gain, or lower `audio.vad_energy_threshold` (try `250`). |
 | Gibberish transcripts | Run `./run.sh --setup` to re-fetch the Vosk model; speak closer to the mic. |
 | No spoken replies | Check `espeak-ng` installed (`dnf install espeak-ng`); try `espeak-ng "test"`. |
+| No answer notifications | Check `libnotify`/`notify-send` exists (`dnf install libnotify`). |
 | Agent never answers | Ensure the assistant is running (bridge port 8765), then tell the Arena agent to check the inbox. Inspect `data/agent_inbox/`, `data/agent_outbox/`. |
 | Port busy | Change `agent.port` in `config/config.yaml`. |
 | Mic busy | Close other recording apps (Zoom, browser tabs). |

@@ -185,12 +185,15 @@ class AppsSkill(Skill):
         )
 
     def _launch(self, entry: DesktopEntry) -> bool:
+        from assistant.notify import clean_env
+
+        env = clean_env()  # never inherit the orb's GDK_BACKEND=x11 preference
         # gio launch works under GNOME on both X11 and Wayland.
         if shutil.which("gio"):
             try:
                 proc = subprocess.run(
                     ["gio", "launch", str(entry.path)],
-                    capture_output=True, text=True, timeout=10,
+                    capture_output=True, text=True, timeout=10, env=env,
                 )
                 if proc.returncode == 0:
                     return True
@@ -201,7 +204,7 @@ class AppsSkill(Skill):
             try:
                 subprocess.Popen(
                     ["gtk-launch", entry.app_id],
-                    start_new_session=True,
+                    start_new_session=True, env=env,
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 )
                 return True
@@ -211,7 +214,7 @@ class AppsSkill(Skill):
             try:
                 cmd = re.sub(r"%[fFuUdDkKcCiIm]", "", entry.exec_line).strip()
                 subprocess.Popen(
-                    cmd, shell=True, start_new_session=True,
+                    cmd, shell=True, start_new_session=True, env=env,
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 )
                 return True

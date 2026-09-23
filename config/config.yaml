@@ -20,15 +20,27 @@ tts:
   voice: null                  # null = system default voice
   mute: false
 
+# ---------------------------------------------------------------------------
+# The orb — the ONLY window: a small circle, no text, Google-AI gradient,
+# spring-following the cursor, fully click-through.
+# ---------------------------------------------------------------------------
+orb:
+  enabled: true
+  size: 132               # diameter in pixels
+  opacity: 0.97
+  follow_omega: 14.0      # spring sharpness (higher = snappier follow)
+  follow_zeta: 0.85       # damping ratio  (lower  = floatier lag)
+
 activation:
-  # Cursor shake => open a listening session (primary activation)
+  # Even a LIGHT cursor wiggle opens a listening session.
   shake:
     enabled: true
-    backend: auto              # auto | pynput (X11) | evdev (Wayland/native)
-    direction_changes: 4       # direction reversals needed
-    window_seconds: 0.7        # within this time window
-    min_travel_px: 100         # minimum total mouse travel
-    cooldown_seconds: 1.5
+    backend: auto              # auto | pynput (X11/XWayland) | evdev (Wayland)
+    direction_changes: 3       # reversals needed  (3 = light shake)
+    window_seconds: 1.0        # within this window
+    min_travel_px: 18          # total travel both axes — very light
+    cooldown_seconds: 0.8
+    min_event_px: 0.8          # ignore sub-pixel jitter
   # Keyboard hotkey toggle (evdev on Wayland, pynput on X11)
   hotkey:
     enabled: true
@@ -36,14 +48,6 @@ activation:
   # When true, sessions auto re-arm after every answer ("always active")
   always_listening: false
   session_timeout: 20          # seconds of silence before a session disarms
-
-hud:
-  enabled: true
-  always_on_top: true
-  width: 440
-  height: 620
-  x: 24
-  y: 24
 
 agent:
   host: 127.0.0.1

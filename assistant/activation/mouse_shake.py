@@ -1,12 +1,20 @@
-"""Cursor-shake activation.
+"""Cursor-shake activation — tuned so even a LIGHT wiggle triggers it.
 
 Backends
 --------
-* pynput — X11 (and XWayland) sessions; uses the Python input library.
-* evdev  — native Wayland sessions on Fedora; reads /dev/input directly.
-           Requires the user to be in the `input` group (run.sh offers this).
+* pynput — X11/XWayland; uses the Python input library.
+* evdev  — native Wayland on Fedora; reads /dev/input directly
+           (needs the `input` group — run.sh offers to add you).
 
-Both feed the same direction-reversal detector.
+Both feed the same oscillator detector, which is deliberately gentle:
+
+    • 3 direction reversals inside 1.0 s   (was 4 inside 0.7 s)
+    • only ~18 px of total travel          (was 100 px)
+    • both axes count toward travel, so diagonal wiggles register
+    • events smaller than ~0.8 px are ignored (scroll jitter, hand tremor)
+
+Every movement also fans out to an optional `on_move` callback so the orb
+can integrate cursor deltas when the pointer query is unavailable.
 """
 
 from __future__ import annotations
@@ -19,62 +27,78 @@ from assistant.logger import get_logger
 
 log = get_logger("shake")
 
+# Defaults = "light shake" profile (config can still override).
+DEFAULT_DIRECTION_CHANGES = 3
+DEFAULT_WINDOW_SECONDS = 1.0
+DEFAULT_MIN_TRAVEL_PX = 18.0
+DEFAULT_COOLDOWN_SECONDS = 0.8
+DEFAULT_MIN_EVENT_PX = 0.8
+
 
 class ShakeDetector:
     """Counts direction reversals of cursor travel inside a rolling window."""
 
     def __init__(
         self,
-        direction_changes: int = 4,
-        window_seconds: float = 0.7,
-        min_travel: float = 100.0,
-        cooldown_seconds: float = 1.5,
+        direction_changes: int = DEFAULT_DIRECTION_CHANGES,
+        window_seconds: float = DEFAULT_WINDOW_SECONDS,
+        min_travel: float = DEFAULT_MIN_TRAVEL_PX,
+        cooldown_seconds: float = DEFAULT_COOLDOWN_SECONDS,
+        min_event_px: float = DEFAULT_MIN_EVENT_PX,
         on_shake: Callable[[], None] | None = None,
+        on_move: Callable[[float, float], None] | None = None,
     ):
         self.direction_changes = max(2, int(direction_changes))
-        self.window_seconds = window_seconds
-        self.min_travel = min_travel
-        self.cooldown = cooldown_seconds
+        self.window_seconds = float(window_seconds)
+        self.min_travel = float(min_travel)
+        self.cooldown = float(cooldown_seconds)
+        self.min_event_px = float(min_event_px)
         self.on_shake = on_shake
+        self.on_move = on_move
 
-        self._events: list[tuple[float, float, int]] = []  # (t, delta, sign)
+        self._events: list[tuple[float, float, int]] = []  # (t, travel, sign)
         self._last_fired = 0.0
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
     def feed(self, dx: float, dy: float) -> None:
-        """Feed one mouse movement (dx, dy)."""
-        # Track horizontal primarily; use dominant axis so diagonal wiggles count.
-        delta = abs(dx)
-        sign = 1 if dx > 0 else (-1 if dx < 0 else 0)
-        if abs(dy) > abs(dx):
-            delta = abs(dy)
-            sign = 1 if dy > 0 else (-1 if dy < 0 else 0)
-        if sign == 0 or delta < 0.5:
+        """Feed one mouse movement (dx, dy in pixels)."""
+        # always let the cursor tracker integrate raw deltas
+        if self.on_move is not None and (dx or dy):
+            try:
+                self.on_move(dx, dy)
+            except Exception:  # noqa: BLE001
+                log.exception("on_move callback failed")
+
+        travel = abs(dx) + abs(dy)          # both axes count (light shakes
+        if travel < self.min_event_px:      # are often diagonal)
             return
+        # dominant axis decides the direction of this event
+        if abs(dx) >= abs(dy):
+            sign = 1 if dx > 0 else -1
+        else:
+            sign = 1 if dy > 0 else -1
 
         now = time.monotonic()
         with self._lock:
-            self._events.append((now, delta, sign))
+            self._events.append((now, travel, sign))
             cutoff = now - self.window_seconds
             while self._events and self._events[0][0] < cutoff:
                 self._events.pop(0)
 
             if len(self._events) < self.direction_changes:
                 return
-            travel = sum(e[1] for e in self._events)
-            if travel < self.min_travel:
+            total = sum(e[1] for e in self._events)
+            if total < self.min_travel:
                 return
-            # count sign flips over the window
             signs = [e[2] for e in self._events]
             flips = sum(1 for a, b in zip(signs, signs[1:]) if a != b)
             if flips + 1 >= self.direction_changes:
-                if now - self._last_fired >= self.cooldown:
-                    self._last_fired = now
-                    self._events.clear()
-                    callback = self.on_shake
-                else:
+                if now - self._last_fired < self.cooldown:
                     return
+                self._last_fired = now
+                self._events.clear()
+                callback = self.on_shake
                 if callback:
                     threading.Thread(
                         target=self._safe_call, args=(callback,), daemon=True
@@ -95,7 +119,6 @@ class ShakeDetector:
 def pick_backend(preferred: str = "auto") -> str:
     if preferred in ("pynput", "evdev"):
         return preferred
-    # Wayland detection
     import os
 
     if os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland" or \
@@ -154,7 +177,8 @@ class EvdevInputMonitor:
             caps = dev.capabilities()
             rel = caps.get(self._evdev.ecodes.EV_REL, [])
             keys = caps.get(self._evdev.ecodes.EV_KEY, [])
-            if self._evdev.ecodes.REL_X in rel and self._evdev.ecodes.BTN_LEFT in keys:
+            if self._evdev.ecodes.REL_X in rel and \
+                    self._evdev.ecodes.BTN_LEFT in keys:
                 mice.append(dev)
             elif self._hotkey_codes and any(k in keys for k in self._hotkey_codes):
                 keyboards.append(dev)
@@ -166,7 +190,7 @@ class EvdevInputMonitor:
         if not mice:
             log.warning(
                 "no mouse devices readable — add your user to the 'input' group "
-                "(run.sh can do this) or use the HUD Talk button"
+                "(run.sh can do this)"
             )
 
     def start(self) -> None:
@@ -222,7 +246,7 @@ class EvdevInputMonitor:
 
 
 class PynputInputMonitor:
-    """Mouse shake (+ optional keyboard hotkey) via pynput on X11."""
+    """Mouse shake (+ optional keyboard hotkey) via pynput on X11/XWayland."""
 
     def __init__(self, detector: ShakeDetector,
                  hotkey_keys: list[str] | None = None,
@@ -245,23 +269,17 @@ class PynputInputMonitor:
             try:
                 from pynput import keyboard
 
-                combo = {
-                    getattr(keyboard.Key, k, None) or getattr(keyboard.KeyCode, k, None)
-                    for k in self.hotkey_keys
-                }
-                combo.discard(None)
-                # normalise aliases like ctrl → Key.ctrl
                 normalised = set()
                 for k in self.hotkey_keys:
-                    for candidate in (k, k.replace("ctrl", "ctrl")):
-                        attr = {
-                            "ctrl": "ctrl", "alt": "alt", "shift": "shift",
-                            "cmd": "cmd", "super": "cmd", "v": None,
-                        }.get(candidate)
-                        if attr:
-                            normalised.add(getattr(keyboard.Key, attr, None))
-                        else:
-                            normalised.add(keyboard.KeyCode.from_char(candidate))
+                    if k in ("ctrl", "alt", "shift", "cmd"):
+                        normalised.add(getattr(keyboard.Key, k, None))
+                    elif k in ("super", "win"):
+                        normalised.add(getattr(keyboard.Key, "cmd", None))
+                    else:
+                        try:
+                            normalised.add(keyboard.KeyCode.from_char(k))
+                        except Exception:  # noqa: BLE001
+                            pass
                 normalised.discard(None)
 
                 pressed: set = set()
@@ -324,5 +342,5 @@ def start_input_monitor(cfg, detector: ShakeDetector,
         return monitor
     except Exception as exc:  # noqa: BLE001
         log.warning("pynput backend failed: %s", exc)
-        log.info("hint: use the HUD Talk button to activate listening")
+        log.info("hint: Ctrl+Alt+V toggles listening if shake is unavailable")
         return None

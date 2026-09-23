@@ -78,11 +78,15 @@ DNF_PKGS=(
   python3 python3-pip python3-virtualenv python3-devel
   gcc                  # needed if pip must compile evdev (pynput dependency)
   python3-tkinter
+  python3-gobject      # PyGObject — the AI orb (GTK3)
+  python3-cairo        # cairo bindings for the orb gradient
+  gtk3
+  xorg-x11-server-Xwayland  # orb positioning on GNOME Wayland
   portaudio          # sounddevice backend
   espeak-ng          # TTS voices
   pulseaudio-utils   # pactl volume control
   xdg-utils gio2     # gio is part of glib2; listed via fallback below
-  libnotify          # notify-send (optional nicety)
+  libnotify          # notify-send — agent answers display as notifications
   python3-evdev      # Wayland cursor-shake + hotkey detection (also satisfies pynput)
   unzip curl
 )
