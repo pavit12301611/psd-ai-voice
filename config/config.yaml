@@ -1,0 +1,77 @@
+# PSD AI Voice Assistant — configuration
+# Copy lives at config/config.yaml; runtime data goes under data/.
+
+audio:
+  sample_rate: 16000
+  device: null            # null = system default input device
+  vad_energy_threshold: 400   # raise if it triggers on background noise
+  silence_seconds: 1.2        # end of utterance after this much silence
+  max_utterance_seconds: 12
+  min_speech_seconds: 0.35
+
+stt:
+  engine: vosk                 # vosk (offline, default) | whisper (optional, if installed)
+  model_path: data/models/vosk/vosk-model-small-en-us-0.15
+
+tts:
+  engine: pyttsx3              # uses espeak-ng on Fedora
+  rate: 170                    # words per minute
+  volume: 1.0
+  voice: null                  # null = system default voice
+  mute: false
+
+activation:
+  # Cursor shake => open a listening session (primary activation)
+  shake:
+    enabled: true
+    backend: auto              # auto | pynput (X11) | evdev (Wayland/native)
+    direction_changes: 4       # direction reversals needed
+    window_seconds: 0.7        # within this time window
+    min_travel_px: 100         # minimum total mouse travel
+    cooldown_seconds: 1.5
+  # Keyboard hotkey toggle (evdev on Wayland, pynput on X11)
+  hotkey:
+    enabled: true
+    keys: ["ctrl", "alt", "v"]
+  # When true, sessions auto re-arm after every answer ("always active")
+  always_listening: false
+  session_timeout: 20          # seconds of silence before a session disarms
+
+hud:
+  enabled: true
+  always_on_top: true
+  width: 440
+  height: 620
+  x: 24
+  y: 24
+
+agent:
+  host: 127.0.0.1
+  port: 8765
+  inbox_dir: data/agent_inbox
+  outbox_dir: data/agent_outbox
+  status_file: data/agent_status.json
+  answer_timeout: 180          # seconds to wait for a human/agent answer
+  # Optional LLM fallback used when no Arena agent answers in time (or offline).
+  llm:
+    enabled: false
+    api_key_env: OPENAI_API_KEY
+    base_url: https://api.openai.com/v1
+    model: gpt-4o-mini
+    timeout: 60
+
+knowledge:
+  seed_file: config/knowledge.seed.json
+  path: data/knowledge.json    # writable store — the assistant "teaches" itself here
+
+calendar:
+  db: data/calendar.db
+  ics_dir: data/calendar
+  open_with: gnome-calendar    # app id used to open the calendar UI
+
+notes:
+  path: data/notes.json
+
+logging:
+  level: INFO
+  file: data/assistant.log

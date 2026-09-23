@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "about_self",
+      "topics": ["who are you", "what are you", "your name", "introduce yourself", "about you"],
+      "answer": "I'm PSD Voice, your personal voice assistant running right here on your computer. I handle your calendar, open apps, control your system, keep notes and timers, and when I don't know something I send a carefully written prompt to Agent Mode and read you the answer."
+    },
+    {
+      "id": "capabilities",
+      "topics": ["what can you do", "help", "capabilities", "features", "commands", "your skills"],
+      "answer": "I can add events to your calendar, open any installed app, control volume and brightness, take screenshots, lock your screen, tell the time, set timers, keep notes, check my own knowledge, and send work requests to Agent Mode. Shake your mouse to talk to me. Say: what can you do for a full tour."
+    },
+    {
+      "id": "activation",
+      "topics": ["wake you", "activate", "shake", "talk to you", "start listening", "how do i use you", "cursor"],
+      "answer": "Shake your cursor left and right quickly and I'll start listening. You can also press the Talk button on the HUD or hit Control Alt V. I stay armed until you're done talking, then go back to sleep until the next shake."
+    },
+    {
+      "id": "agent_mode",
+      "topics": ["agent mode", "who answers", "how do you ask", "escalate", "you don't know", "contact you"],
+      "answer": "When a question is outside my built-in knowledge, I craft a structured task prompt and queue it to Agent Mode on this machine. The answer comes back, shows up on the HUD, and I read it to you. You can also dictate a prompt directly by starting with the word prompt."
+    },
+    {
+      "id": "work_status",
+      "topics": ["working on", "project status", "are you working", "agent status", "done yet", "progress"],
+      "answer": "I watch Agent Mode's status feed. When work starts on your project I'll announce it, and when it finishes I'll tell you it's done, including the task name. You can ask anytime: what's the agent status."
+    },
+    {
+      "id": "calendar_help",
+      "topics": ["add to calendar", "schedule", "calendar how", "create event", "remind me"],
+      "answer": "Just say add this to my calendar followed by the event and time, like: add project sync tomorrow at 3 pm to my calendar. I store it locally, export it as a calendar file, and can open GNOME Calendar for you."
+    },
+    {
+      "id": "open_apps_help",
+      "topics": ["open app", "launch program", "how to open"],
+      "answer": "Say open followed by the app name, for example: open Firefox, open Files, or open GNOME Calendar. I search the installed applications on this computer and launch the best match."
+    },
+    {
+      "id": "how_to_work",
+      "topics": ["how do i", "how to", "teach me", "walk me through", "guide me"],
+      "answer": "Tell me the task in your own words, like: how do I create a new user on Fedora. I send it to Agent Mode, which returns clear step-by-step instructions that I read out and keep on the HUD so you can work through them at your pace."
+    },
+    {
+      "id": "prompt_direct",
+      "topics": ["give prompt", "write a prompt", "prompt for agent", "exact work"],
+      "answer": "Start your sentence with the word prompt and describe the work exactly as you want it. For example: prompt, refactor my backup script to run nightly and email me failures. I polish it into a structured brief and hand it to Agent Mode."
+    },
+    {
+      "id": "teach",
+      "topics": ["teach you", "remember that", "add to knowledge", "learn this"],
+      "answer": "Say: remember that plus the fact you want me to keep, for example: remember that the deploy server is called thor. I'll store it in my knowledge base and answer with it next time."
+    },
+    {
+      "id": "greeting",
+      "topics": ["hello", "hi there", "hey", "good morning", "good evening", "yo"],
+      "answer": "Hey! I'm here and listening. Shake the cursor anytime to talk, or ask me what you can do."
+    },
+    {
+      "id": "thanks",
+      "topics": ["thank you", "thanks", "cheers", "appreciate it"],
+      "answer": "Anytime. I'll be right here if you need me."
+    },
+    {
+      "id": "fedora_identity",
+      "topics": ["what operating system", "which distro", "what linux", "fedora version"],
+      "answer": "You're running Fedora Workstation 44 and I was built specifically for it — I use GNOME, PipeWire audio, and native Wayland input for the cursor-shake trigger."
+    }
+  ]
+}
