@@ -96,6 +96,41 @@ def test_smooth_step_first_step_is_gentle():
 
 
 # ---------------------------------------------------------------------------
+# pycairo portability — Gradient.transform() does NOT exist on Fedora builds
+# (regression guard for the runtime AttributeError the user hit).
+# ---------------------------------------------------------------------------
+def test_gradient_rotation_uses_endpoints_not_pattern_transform():
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parent.parent.joinpath(
+        "assistant/ui/orb.py"
+    ).read_text(encoding="utf-8")
+    assert "grad.transform" not in src, (
+        "pycairo LinearGradient has no .transform() — rotate the gradient "
+        "endpoints (cx ± R·cos/sin) instead"
+    )
+    assert "Matrix.init_rotate" not in src, (
+        "pattern matrices are unnecessary — use rotated endpoints"
+    )
+    assert "cx - R * ca" in src and "cx + R * ca" in src, (
+        "rotating-endpoint gradient construction missing"
+    )
+
+
+def test_draw_and_tick_are_crash_guarded():
+    """A single bad frame must log once and fall back — never flood the log."""
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parent.parent.joinpath(
+        "assistant/ui/orb.py"
+    ).read_text(encoding="utf-8")
+    assert "_draw_failed" in src and "_draw_fallback" in src
+    assert "_tick_failed" in src
+    # tick wrapper must ALWAYS return True so the GLib timer survives
+    assert "return True  # ALWAYS keep the timer alive" in src
+
+
+# ---------------------------------------------------------------------------
 # Light shake profile — the whole point: a GENTLE wiggle must trigger
 # ---------------------------------------------------------------------------
 def test_light_shake_fires_with_default_profile():

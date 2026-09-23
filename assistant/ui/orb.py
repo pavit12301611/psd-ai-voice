@@ -197,6 +197,8 @@ class OrbUI:
         self.Gtk = self.Gdk = self.GLib = self.cairo = None
         self.win = None
         self._tick_id = None
+        self._draw_failed = False   # log a full traceback only once
+        self._tick_failed = False
 
     # -- lifecycle ----------------------------------------------------
     def build(self) -> None:
@@ -345,6 +347,15 @@ class OrbUI:
 
     # -- frame ------------------------------------------------------------
     def _tick(self) -> bool:
+        try:
+            self._tick_body()
+        except Exception:  # noqa: BLE001 — a GLib timer that raises dies silently
+            if not self._tick_failed:
+                self._tick_failed = True
+                log.exception("orb tick failed — will keep retrying (logged once)")
+        return True  # ALWAYS keep the timer alive
+
+    def _tick_body(self) -> None:
         now = time.monotonic()
         dt = now - self._last_tick
         self._last_tick = now
@@ -375,11 +386,58 @@ class OrbUI:
 
         if self.win is not None:
             self.win.queue_draw()
-        return True  # keep the timer alive
 
     # -- draw ----------------------------------------------------------------
     def _on_draw(self, _widget, cr) -> bool:  # noqa: ANN001
-        Gtk, _Gdk, _GLib, cairo = self.Gtk, self.Gdk, self.GLib, self.cairo
+        """Never let one bad frame flood the log or break the overlay."""
+        try:
+            return self._draw_full(cr)
+        except Exception as exc:  # noqa: BLE001
+            if not self._draw_failed:
+                self._draw_failed = True
+                log.exception(
+                    "orb draw failed — switching to simple fallback disc (%s)",
+                    exc,
+                )
+            try:
+                self._draw_fallback(cr)
+            except Exception:  # noqa: BLE001
+                pass
+            return True
+
+    def _draw_fallback(self, cr) -> bool:  # noqa: ANN001
+        """Minimal gradient disc using only RadialGradient (universally supported)."""
+        cairo = self.cairo
+        W = H = self.size
+        cx, cy = W / 2.0, H / 2.0
+        R = self.size * 0.36
+
+        cr.set_operator(cairo.OPERATOR_CLEAR)
+        cr.paint()
+        cr.set_operator(cairo.OPERATOR_OVER)
+
+        col = sample_palette(self._t * 0.1)
+        hi = (min(col[0] + 0.35, 1.0), min(col[1] + 0.35, 1.0),
+              min(col[2] + 0.35, 1.0))
+
+        g = cairo.RadialGradient(cx - R * 0.3, cy - R * 0.3, R * 0.05,
+                                 cx, cy, R)
+        g.add_color_stop_rgba(0.0, hi[0], hi[1], hi[2], self.opacity)
+        g.add_color_stop_rgba(1.0, col[0], col[1], col[2], self.opacity)
+        cr.set_source(g)
+        cr.arc(cx, cy, R, 0, 2 * math.pi)
+        cr.fill()
+
+        g2 = cairo.RadialGradient(cx, cy, R * 0.9, cx, cy, R * 1.6)
+        g2.add_color_stop_rgba(0.0, col[0], col[1], col[2], 0.35)
+        g2.add_color_stop_rgba(1.0, col[0], col[1], col[2], 0.0)
+        cr.set_source(g2)
+        cr.arc(cx, cy, R * 1.6, 0, 2 * math.pi)
+        cr.fill()
+        return True
+
+    def _draw_full(self, cr) -> bool:  # noqa: ANN001
+        _Gtk, _Gdk, _GLib, cairo = self.Gtk, self.Gdk, self.GLib, self.cairo
         p = self._params
         t = self._t
         W = H = self.size
@@ -442,9 +500,15 @@ class OrbUI:
                 cr.line_to(x, y)
         cr.close_path()
 
-        grad = cairo.LinearGradient(-R, 0, R, 0)
-        matrix = cairo.Matrix.init_rotate(angle)
-        grad.transform(matrix)
+        # Rotating Google-AI gradient — endpoints computed directly.
+        # (Do NOT use pattern.transform(): that API does not exist on
+        # pycairo's LinearGradient on many Fedora builds — only set_matrix
+        # does, and endpoint rotation is portable everywhere.)
+        ca, sa = math.cos(angle), math.sin(angle)
+        grad = cairo.LinearGradient(
+            cx - R * ca, cy - R * sa,   # start: -R along the rotated axis
+            cx + R * ca, cy + R * sa,   # end:   +R along the rotated axis
+        )
         n_stops = len(GOOGLE_AI_PALETTE)
         for i, col in enumerate(GOOGLE_AI_PALETTE):
             u = i / (n_stops - 1)
